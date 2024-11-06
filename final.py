@@ -1,7 +1,16 @@
-# AES-256 Implementation without external libraries
+"""
+ Name:      Malik Freeman
+ Date:      11/10/2024
+ Corse:     SSE 657  Object-Oriented Methods
+ Assignment: Week 12 Programming assignment :  Implement functions to perform AES-256 encryption and decryption in native code (not using any library). 
+"""
 
-# S-box for SubBytes transformation
-SBOX = [
+
+
+
+"""S-box :Non-linear substitution table used in several byte substitution transformations and in the 
+   Key Expansion routine to perform a one-for-one substitution of a byte value."""
+S_box = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
     0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
     0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
@@ -20,8 +29,9 @@ SBOX = [
     0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
 ]
 
-# Inverse S-box for decryption
-INV_SBOX = [
+
+"""Inverse S-box"""
+Inv_S_box = [
     0x52, 0x09, 0x6a, 0xd5, 0x30, 0x36, 0xa5, 0x38, 0xbf, 0x40, 0xa3, 0x9e, 0x81, 0xf3, 0xd7, 0xfb,
     0x7c, 0xe3, 0x39, 0x82, 0x9b, 0x2f, 0xff, 0x87, 0x34, 0x8e, 0x43, 0x44, 0xc4, 0xde, 0xe9, 0xcb,
     0x54, 0x7b, 0x94, 0x32, 0xa6, 0xc2, 0x23, 0x3d, 0xee, 0x4c, 0x95, 0x0b, 0x42, 0xfa, 0xc3, 0x4e,
@@ -40,7 +50,7 @@ INV_SBOX = [
     0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d
 ]
 
-# Complete Rijndael's Galois field multiplication table for MUL2
+"""Rijndael algorithm table"""
 MUL2 = [
     0x00, 0x02, 0x04, 0x06, 0x08, 0x0a, 0x0c, 0x0e, 0x10, 0x12, 0x14, 0x16, 0x18, 0x1a, 0x1c, 0x1e,
     0x20, 0x22, 0x24, 0x26, 0x28, 0x2a, 0x2c, 0x2e, 0x30, 0x32, 0x34, 0x36, 0x38, 0x3a, 0x3c, 0x3e,
@@ -60,208 +70,225 @@ MUL2 = [
     0xfb, 0xf9, 0xff, 0xfd, 0xf3, 0xf1, 0xf7, 0xf5, 0xeb, 0xe9, 0xef, 0xed, 0xe3, 0xe1, 0xe7, 0xe5
 ]
 
-def gmul(a, b):
+def galois_multiply(a, b):
     """Galois Field multiplication"""
-    p = 0
+    product = 0
     for _ in range(8):
         if b & 1:
-            p ^= a
-        hi_bit_set = a & 0x80
-        a <<= 1
-        if hi_bit_set:
+            product ^= a
+        high_bit = a & 0x80
+        a = (a << 1) & 0xFF
+        if high_bit:
             a ^= 0x1b
-        a &= 0xFF
         b >>= 1
-    return p
+    return product
 
-class AES256:
-    def __init__(self, key):
-        self.rounds = 14
-        self.block_size = 16
-        self.key_size = 32
-        self.key = self._pad_key(key)
-        self.round_keys = self._key_expansion()
+def pad_key(key, key_size=32):
+    """Pad the key to the required size"""
+    if len(key) > key_size:
+        return key[:key_size]
+    return key.ljust(key_size, b'\0')
 
-    def _pad_key(self, key):
-        if len(key) > self.key_size:
-            return key[:self.key_size]
-        return key.ljust(self.key_size, b'\0')
+def bytes_to_grid(data):
+    """Convert bytes to 4x4 grid"""
+    return [[data[i + 4*j] for j in range(4)] for i in range(4)]
 
-    def _text_to_matrix(self, text):
-        return [[text[i + 4*j] for j in range(4)] for i in range(4)]
+def grid_to_bytes(grid):
+    """Convert 4x4 grid back to bytes"""
+    return bytes(grid[j][i] for i in range(4) for j in range(4))
 
-    def _matrix_to_text(self, matrix):
-        return bytes(matrix[j][i] for i in range(4) for j in range(4))
+def format_grid_hex(grid):
+    """Format grid as hex string"""
+    return ''.join(f"{grid[i][j]:02x}" for j in range(4) for i in range(4))
 
-    def _matrix_to_hex(self, matrix):
-        return ''.join(format(matrix[i][j], '02x') for j in range(4) for i in range(4))
+def apply_S_box(state):
+    """Apply S_box transformation"""
+    return [[S_box[state[i][j]] for j in range(4)] for i in range(4)]
 
-    def _sub_bytes(self, state):
-        return [[SBOX[state[i][j]] for j in range(4)] for i in range(4)]
+def reverse_S_box(state):
+    """Apply inverse S_box transformation"""
+    return [[Inv_S_box[state[i][j]] for j in range(4)] for i in range(4)]
 
-    def _inv_sub_bytes(self, state):
-        return [[INV_SBOX[state[i][j]] for j in range(4)] for i in range(4)]
+def rotate_rows(state):
+    """Rotate rows left"""
+    return [
+        state[0],
+        state[1][1:] + state[1][:1],
+        state[2][2:] + state[2][:2],
+        state[3][3:] + state[3][:3]
+    ]
 
-    def _shift_rows(self, state):
-        state[1] = state[1][1:] + state[1][:1]
-        state[2] = state[2][2:] + state[2][:2]
-        state[3] = state[3][3:] + state[3][:3]
-        return state
+def unrotate_rows(state):
+    """Rotate rows right"""
+    return [
+        state[0],
+        state[1][-1:] + state[1][:-1],
+        state[2][-2:] + state[2][:-2],
+        state[3][-3:] + state[3][:-3]
+    ]
 
-    def _inv_shift_rows(self, state):
-        state[1] = state[1][-1:] + state[1][:-1]
-        state[2] = state[2][-2:] + state[2][:-2]
-        state[3] = state[3][-3:] + state[3][:-3]
-        return state
+def transform_column(col):
+    """Transform single column in mix columns"""
+    t = col[:]
+    col[0] = (MUL2[t[0]] ^ MUL2[t[1]] ^ t[1] ^ t[2] ^ t[3])
+    col[1] = (t[0] ^ MUL2[t[1]] ^ MUL2[t[2]] ^ t[2] ^ t[3])
+    col[2] = (t[0] ^ t[1] ^ MUL2[t[2]] ^ MUL2[t[3]] ^ t[3])
+    col[3] = (MUL2[t[0]] ^ t[0] ^ t[1] ^ t[2] ^ MUL2[t[3]])
+    return [x % 256 for x in col]
 
-    def _mix_single_column(self, col):
-        temp = col[:]
-        col[0] = (MUL2[temp[0]] ^ MUL2[temp[1]] ^ temp[1] ^ temp[2] ^ temp[3]) % 256
-        col[1] = (temp[0] ^ MUL2[temp[1]] ^ MUL2[temp[2]] ^ temp[2] ^ temp[3]) % 256
-        col[2] = (temp[0] ^ temp[1] ^ MUL2[temp[2]] ^ MUL2[temp[3]] ^ temp[3]) % 256
-        col[3] = (MUL2[temp[0]] ^ temp[0] ^ temp[1] ^ temp[2] ^ MUL2[temp[3]]) % 256
-        return col
+def mix_state_columns(state):
+    """Mix columns transformation"""
+    for i in range(4):
+        col = [state[j][i] for j in range(4)]
+        col = transform_column(col)
+        for j in range(4):
+            state[j][i] = col[j]
+    return state
 
-    def _mix_columns(self, state):
-        for i in range(4):
-            col = [state[j][i] for j in range(4)]
-            col = self._mix_single_column(col)
-            for j in range(4):
-                state[j][i] = col[j]
-        return state
+def unmix_column(col):
+    """Inverse column mixing"""
+    t = col[:]
+    col[0] = (galois_multiply(t[0], 0x0e) ^ galois_multiply(t[1], 0x0b) ^
+              galois_multiply(t[2], 0x0d) ^ galois_multiply(t[3], 0x09))
+    col[1] = (galois_multiply(t[0], 0x09) ^ galois_multiply(t[1], 0x0e) ^
+              galois_multiply(t[2], 0x0b) ^ galois_multiply(t[3], 0x0d))
+    col[2] = (galois_multiply(t[0], 0x0d) ^ galois_multiply(t[1], 0x09) ^
+              galois_multiply(t[2], 0x0e) ^ galois_multiply(t[3], 0x0b))
+    col[3] = (galois_multiply(t[0], 0x0b) ^ galois_multiply(t[1], 0x0d) ^
+              galois_multiply(t[2], 0x09) ^ galois_multiply(t[3], 0x0e))
+    return [x % 256 for x in col]
 
-    def _inv_mix_single_column(self, col):
-        temp = col[:]
-        col[0] = (gmul(temp[0], 0x0e) ^ gmul(temp[1], 0x0b) ^ 
-                  gmul(temp[2], 0x0d) ^ gmul(temp[3], 0x09)) % 256
-        col[1] = (gmul(temp[0], 0x09) ^ gmul(temp[1], 0x0e) ^ 
-                  gmul(temp[2], 0x0b) ^ gmul(temp[3], 0x0d)) % 256
-        col[2] = (gmul(temp[0], 0x0d) ^ gmul(temp[1], 0x09) ^ 
-                  gmul(temp[2], 0x0e) ^ gmul(temp[3], 0x0b)) % 256
-        col[3] = (gmul(temp[0], 0x0b) ^ gmul(temp[1], 0x0d) ^ 
-                  gmul(temp[2], 0x09) ^ gmul(temp[3], 0x0e)) % 256
-        return col
+def InvMixColumns(state):
+    """Inverse mix columns transformation"""
+    for i in range(4):
+        col = [state[j][i] for j in range(4)]
+        col = unmix_column(col)
+        for j in range(4):
+            state[j][i] = col[j]
+    return state
 
-    def _inv_mix_columns(self, state):
-        for i in range(4):
-            col = [state[j][i] for j in range(4)]
-            col = self._inv_mix_single_column(col)
-            for j in range(4):
-                state[j][i] = col[j]
-        return state
+def xor_round_key(state, round_key):
+    """XOR state with round key"""
+    return [[state[i][j] ^ round_key[i][j] for j in range(4)] for i in range(4)]
 
-    def _add_round_key(self, state, round_key):
-        return [[state[i][j] ^ round_key[i][j] for j in range(4)] for i in range(4)]
+def key_expansion(key, rounds=14):
+    """Generate round keys"""
+    round_keys = []
+    for i in range(4 * (rounds + 1)):
+        round_keys.append([0, 0, 0, 0])
+    
+    key_index = 0
+    for i in range(8):
+        for j in range(4):
+            round_keys[i][j] = key[key_index]
+            key_index += 1
+    
+    for i in range(8, 4 * (rounds + 1)):
+        temp = round_keys[i-1].copy()
+        
+        if i % 8 == 0:
+            temp = temp[1:] + temp[:1]
+            temp = [S_box[b] for b in temp]
+            temp[0] ^= (1 << ((i//8) - 1))
+        elif i % 8 == 4:
+            temp = [S_box[b] for b in temp]
+        
+        for j in range(4):
+            round_keys[i][j] = round_keys[i-8][j] ^ temp[j]
+    
+    final_round_keys = []
+    for i in range(rounds + 1):
+        key_matrix = [[0 for _ in range(4)] for _ in range(4)]
+        for j in range(4):
+            for k in range(4):
+                key_matrix[j][k] = round_keys[4*i + k][j]
+        final_round_keys.append(key_matrix)
+    
+    return final_round_keys
 
-    def _key_expansion(self):
-        round_keys = []
-        for i in range(4 * (self.rounds + 1)):
-            round_keys.append([0, 0, 0, 0])
+def encrypt(plaintext, key):
+    """Encrypt a 16-byte plaintext with a 32-byte key"""
+    rounds = 14
+    key = pad_key(key)
+    round_keys = key_expansion(key)
+    state = bytes_to_grid(plaintext)
+    
+    print(f"round[ 0].input {format_grid_hex(state)}")
+    print(f"round[ 0].k_sch {format_grid_hex(round_keys[0])}")
+    
+    state = xor_round_key(state, round_keys[0])
+    
+    for round in range(1, rounds):
+        print(f"round[{round:2d}].start {format_grid_hex(state)}")
         
-        key_index = 0
-        for i in range(8):
-            for j in range(4):
-                round_keys[i][j] = self.key[key_index]
-                key_index += 1
+        state = apply_S_box(state)
+        print(f"round[{round:2d}].s_box {format_grid_hex(state)}")
         
-        for i in range(8, 4 * (self.rounds + 1)):
-            temp = round_keys[i-1].copy()
-            
-            if i % 8 == 0:
-                temp = temp[1:] + temp[:1]
-                temp = [SBOX[b] for b in temp]
-                temp[0] ^= (1 << ((i//8) - 1))
-            elif i % 8 == 4:
-                temp = [SBOX[b] for b in temp]
-            
-            for j in range(4):
-                round_keys[i][j] = round_keys[i-8][j] ^ temp[j]
+        state = rotate_rows(state)
+        print(f"round[{round:2d}].s_row {format_grid_hex(state)}")
         
-        final_round_keys = []
-        for i in range(self.rounds + 1):
-            key_matrix = [[0 for _ in range(4)] for _ in range(4)]
-            for j in range(4):
-                for k in range(4):
-                    key_matrix[j][k] = round_keys[4*i + k][j]
-            final_round_keys.append(key_matrix)
+        state = mix_state_columns(state)
+        print(f"round[{round:2d}].m_col {format_grid_hex(state)}")
         
-        return final_round_keys
+        print(f"round[{round:2d}].k_sch {format_grid_hex(round_keys[round])}")
+        state = xor_round_key(state, round_keys[round])
+    
+    print(f"round[{rounds:2d}].start {format_grid_hex(state)}")
+    
+    state = apply_S_box(state)
+    print(f"round[{rounds:2d}].s_box {format_grid_hex(state)}")
+    
+    state = rotate_rows(state)
+    print(f"round[{rounds:2d}].s_row {format_grid_hex(state)}")
+    
+    print(f"round[{rounds:2d}].k_sch {format_grid_hex(round_keys[rounds])}")
+    state = xor_round_key(state, round_keys[rounds])
+    
+    print(f"round[{rounds:2d}].output {format_grid_hex(state)}")
+    
+    return grid_to_bytes(state)
 
-    def encrypt(self, plaintext):
-        state = self._text_to_matrix(plaintext)
+def decrypt(ciphertext, key):
+    """Decrypt a 16-byte ciphertext with a 32-byte key"""
+    rounds = 14
+    key = pad_key(key)
+    round_keys = key_expansion(key)
+    state = bytes_to_grid(ciphertext)
+    
+    print(f"round[ 0].iinput {format_grid_hex(state)}")
+    print(f"round[ 0].ik_sch {format_grid_hex(round_keys[rounds])}")
+    
+    state = xor_round_key(state, round_keys[rounds])
+    
+    for round in range(rounds - 1, 0, -1):
+        print(f"round[{rounds-round:2d}].istart {format_grid_hex(state)}")
         
-        print(f"round[ 0].input {self._matrix_to_hex(state)}")
-        print(f"round[ 0].k_sch {self._matrix_to_hex(self.round_keys[0])}")
+        state = unrotate_rows(state)
+        print(f"round[{rounds-round:2d}].is_row {format_grid_hex(state)}")
         
-        state = self._add_round_key(state, self.round_keys[0])
+        state = reverse_S_box(state)
+        print(f"round[{rounds-round:2d}].is_box {format_grid_hex(state)}")
         
-        for round in range(1, self.rounds):
-            print(f"round[{round:2d}].start {self._matrix_to_hex(state)}")
-            
-            state = self._sub_bytes(state)
-            print(f"round[{round:2d}].s_box {self._matrix_to_hex(state)}")
-            
-            state = self._shift_rows(state)
-            print(f"round[{round:2d}].s_row {self._matrix_to_hex(state)}")
-            
-            state = self._mix_columns(state)
-            print(f"round[{round:2d}].m_col {self._matrix_to_hex(state)}")
-            
-            print(f"round[{round:2d}].k_sch {self._matrix_to_hex(self.round_keys[round])}")
-            state = self._add_round_key(state, self.round_keys[round])
+        print(f"round[{rounds-round:2d}].ik_sch {format_grid_hex(round_keys[round])}")
+        state = xor_round_key(state, round_keys[round])
+        print(f"round[{rounds-round:2d}].ik_add {format_grid_hex(state)}")
         
-        print(f"round[{self.rounds:2d}].start {self._matrix_to_hex(state)}")
-        
-        state = self._sub_bytes(state)
-        print(f"round[{self.rounds:2d}].s_box {self._matrix_to_hex(state)}")
-        
-        state = self._shift_rows(state)
-        print(f"round[{self.rounds:2d}].s_row {self._matrix_to_hex(state)}")
-        
-        print(f"round[{self.rounds:2d}].k_sch {self._matrix_to_hex(self.round_keys[self.rounds])}")
-        state = self._add_round_key(state, self.round_keys[self.rounds])
-        
-        print(f"round[{self.rounds:2d}].output {self._matrix_to_hex(state)}")
-        
-        return self._matrix_to_text(state)
-
-    def decrypt(self, ciphertext):
-        state = self._text_to_matrix(ciphertext)
-        
-        print(f"round[ 0].iinput {self._matrix_to_hex(state)}")
-        print(f"round[ 0].ik_sch {self._matrix_to_hex(self.round_keys[self.rounds])}")
-        
-        state = self._add_round_key(state, self.round_keys[self.rounds])
-        
-        for round in range(self.rounds - 1, 0, -1):
-            print(f"round[{self.rounds-round:2d}].istart {self._matrix_to_hex(state)}")
-            
-            state = self._inv_shift_rows(state)
-            print(f"round[{self.rounds-round:2d}].is_row {self._matrix_to_hex(state)}")
-            
-            state = self._inv_sub_bytes(state)
-            print(f"round[{self.rounds-round:2d}].is_box {self._matrix_to_hex(state)}")
-            
-            print(f"round[{self.rounds-round:2d}].ik_sch {self._matrix_to_hex(self.round_keys[round])}")
-            state = self._add_round_key(state, self.round_keys[round])
-            print(f"round[{self.rounds-round:2d}].ik_add {self._matrix_to_hex(state)}")
-            
-            state = self._inv_mix_columns(state)
-        
-        print(f"round[{self.rounds:2d}].istart {self._matrix_to_hex(state)}")
-        
-        state = self._inv_shift_rows(state)
-        print(f"round[{self.rounds:2d}].is_row {self._matrix_to_hex(state)}")
-        
-        state = self._inv_sub_bytes(state)
-        print(f"round[{self.rounds:2d}].is_box {self._matrix_to_hex(state)}")
-        
-        print(f"round[{self.rounds:2d}].ik_sch {self._matrix_to_hex(self.round_keys[0])}")
-        state = self._add_round_key(state, self.round_keys[0])
-        
-        print(f"round[{self.rounds:2d}].output {self._matrix_to_hex(state)}")
-        
-        return self._matrix_to_text(state)
+        state = InvMixColumns(state)
+    
+    print(f"round[{rounds:2d}].istart {format_grid_hex(state)}")
+    
+    state = unrotate_rows(state)
+    print(f"round[{rounds:2d}].is_row {format_grid_hex(state)}")
+    
+    state = reverse_S_box(state)
+    print(f"round[{rounds:2d}].is_box {format_grid_hex(state)}")
+    
+    print(f"round[{rounds:2d}].ik_sch {format_grid_hex(round_keys[0])}")
+    state = xor_round_key(state, round_keys[0])
+    
+    print(f"round[{rounds:2d}].output {format_grid_hex(state)}")
+    
+    return grid_to_bytes(state)
 
 def main():
     while True:
@@ -285,11 +312,11 @@ def main():
         try:
             if choice == '1':
                 print("\nEnter plaintext (32 hex characters):")
-                print("Example: 00112233445566778899aabbccddeeff")
+                print("Hint: 00112233445566778899aabbccddeeff")
                 text = input().strip()
                 
                 print("\nEnter key (64 hex characters):")
-                print("Example: 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+                print("Hint: 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
                 key = input().strip()
                 
                 text_bytes = bytes.fromhex(text)
@@ -302,16 +329,16 @@ def main():
                     print("Error: Key must be exactly 32 bytes (64 hex characters)")
                     continue
                 
-                aes = AES256(key_bytes)
-                result = aes.encrypt(text_bytes)
+                result = encrypt(text_bytes, key_bytes)
                 print(f"\nEncrypted (hex): {result.hex()}")
                 
             else:
                 print("\nEnter ciphertext (32 hex characters):")
+                print("Hint: 8ea2b7ca516745bfeafc49904b496089")
                 text = input().strip()
                 
                 print("\nEnter key (64 hex characters):")
-                print("Example: 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+                print("Hint: 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
                 key = input().strip()
                 
                 text_bytes = bytes.fromhex(text)
@@ -324,8 +351,7 @@ def main():
                     print("Error: Key must be exactly 32 bytes (64 hex characters)")
                     continue
                 
-                aes = AES256(key_bytes)
-                result = aes.decrypt(text_bytes)
+                result = decrypt(text_bytes, key_bytes)
                 print(f"\nDecrypted (hex): {result.hex()}")
                 
         except ValueError as e:
